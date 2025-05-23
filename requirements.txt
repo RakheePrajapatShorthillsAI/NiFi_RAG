@@ -1,0 +1,19 @@
+# Core dependencies
+fastapi==0.99.1
+uvicorn==0.22.0
+pydantic==1.10.12
+sentence-transformers==2.2.2
+chromadb==0.4.10
+mistralai==0.0.7
+requests==2.31.0
+streamlit==1.28.1
+numpy==1.24.3
+
+# ChromaDB dependencies
+chroma-hnswlib==0.7.3
+tokenizers==0.15.2
+huggingface-hub==0.17.3
+
+# Optional but recommended
+python-dotenv==1.0.1  # For environment variables
+tqdm==4.67.1  # For progress bars 
