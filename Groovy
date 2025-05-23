@@ -1,0 +1,95 @@
+import org.apache.commons.io.IOUtils
+import java.nio.charset.StandardCharsets
+import groovy.json.JsonBuilder
+import java.util.regex.Pattern
+
+def flowFile = session.get()
+if (!flowFile) return
+
+// Define preprocessing functions
+def preprocessText(String text) {
+    text = text.toLowerCase()                      // Convert to lowercase
+    text = text.replaceAll(/\s+/, " ")             // Replace multiple spaces with single space
+    text = text.replaceAll(/[^\w\s\.\?\!]/, "")    // Remove special characters except sentence-ending punctuation
+    return text
+}
+
+// Simple chunk creation function (breaks by paragraph or every ~1000 chars)
+def createChunks(String text) {
+    def chunks = []
+    
+    // First try to split by paragraphs
+    def paragraphs = text.split(/\n\s*\n/)
+    
+    for (paragraph in paragraphs) {
+        paragraph = paragraph.trim()
+        if (!paragraph) continue
+        
+        // If paragraph is very long, break it down further
+        if (paragraph.length() > 1000) {
+            // Split by sentences (simple heuristic)
+            def sentences = paragraph.split(/(?<=[.!?])\s+/)
+            def currentChunk = ""
+            
+            for (sentence in sentences) {
+                if (currentChunk.length() + sentence.length() < 1000) {
+                    currentChunk += currentChunk ? " " + sentence : sentence
+                } else {
+                    if (currentChunk) {
+                        chunks.add(currentChunk)
+                    }
+                    currentChunk = sentence
+                }
+            }
+            
+            if (currentChunk) {
+                chunks.add(currentChunk)
+            }
+        } else {
+            chunks.add(paragraph)
+        }
+    }
+    
+    // If no paragraphs were found, use a simpler approach
+    if (chunks.isEmpty()) {
+        int chunkSize = 1000
+        for (int i = 0; i < text.length(); i += chunkSize) {
+            int end = Math.min(i + chunkSize, text.length())
+            chunks.add(text.substring(i, end))
+        }
+    }
+    
+    return chunks
+}
+
+// Process the text
+flowFile = session.write(flowFile, { inputStream, outputStream ->
+    // Read the text content
+    String text = IOUtils.toString(inputStream, StandardCharsets.UTF_8)
+    
+    // Preprocess the text
+    String processedText = preprocessText(text)
+    
+    // Create chunks
+    def chunks = createChunks(processedText)
+    
+    // Create a JSON document with the chunks
+    def result = [
+        text: processedText,
+        chunks: chunks,
+        chunk_count: chunks.size(),
+        filename: flowFile.getAttribute('filename')
+    ]
+    
+    // Convert to JSON and write to output
+    def json = new JsonBuilder(result).toPrettyString()
+    outputStream.write(json.getBytes(StandardCharsets.UTF_8))
+} as StreamCallback)
+
+// Update attributes
+flowFile = session.putAttribute(flowFile, "mime.type", "application/json")
+flowFile = session.putAttribute(flowFile, "processed.timestamp", String.valueOf(System.currentTimeMillis()))
+flowFile = session.putAttribute(flowFile, "chunks.count", String.valueOf(flowFile.getAttribute('chunk_count')))
+
+// Transfer to success relationship
+session.transfer(flowFile, REL_SUCCESS)
